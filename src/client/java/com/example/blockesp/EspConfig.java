@@ -35,15 +35,15 @@ public final class EspConfig {
 		FURNACES("Furnaces", 0xE0E0E0, false, null),
 
 		// ---- Ores (found by scanning block states) ----
-		DIAMOND_ORE("Diamond", 0x00FFFF, true, s -> s.is(BlockTags.DIAMOND_ORES)),
+		DIAMOND_ORE("Diamond", 0x00FFFF, true, s -> s.is(Blocks.DIAMOND_ORE) || s.is(Blocks.DEEPSLATE_DIAMOND_ORE)),
 		ANCIENT_DEBRIS("Ancient Debris", 0xC06030, true, s -> s.is(Blocks.ANCIENT_DEBRIS)),
-		EMERALD_ORE("Emerald", 0x00FF60, false, s -> s.is(BlockTags.EMERALD_ORES)),
+		EMERALD_ORE("Emerald", 0x00FF60, false, s -> s.is(Blocks.EMERALD_ORE) || s.is(Blocks.DEEPSLATE_EMERALD_ORE)),
 		GOLD_ORE("Gold", 0xFFAA00, false, s -> s.is(BlockTags.GOLD_ORES)),
 		IRON_ORE("Iron", 0xD8AF93, false, s -> s.is(BlockTags.IRON_ORES)),
-		REDSTONE_ORE("Redstone", 0xFF0000, false, s -> s.is(BlockTags.REDSTONE_ORES)),
-		LAPIS_ORE("Lapis", 0x2050FF, false, s -> s.is(BlockTags.LAPIS_ORES)),
+		REDSTONE_ORE("Redstone", 0xFF0000, false, s -> s.is(Blocks.REDSTONE_ORE) || s.is(Blocks.DEEPSLATE_REDSTONE_ORE)),
+		LAPIS_ORE("Lapis", 0x2050FF, false, s -> s.is(Blocks.LAPIS_ORE) || s.is(Blocks.DEEPSLATE_LAPIS_ORE)),
 		COPPER_ORE("Copper", 0xE07040, false, s -> s.is(BlockTags.COPPER_ORES)),
-		COAL_ORE("Coal", 0x404040, false, s -> s.is(BlockTags.COAL_ORES)),
+		COAL_ORE("Coal", 0x404040, false, s -> s.is(Blocks.COAL_ORE) || s.is(Blocks.DEEPSLATE_COAL_ORE)),
 		QUARTZ_ORE("Nether Quartz", 0xF0F0F0, false, s -> s.is(Blocks.NETHER_QUARTZ_ORE));
 
 		public final String label;
