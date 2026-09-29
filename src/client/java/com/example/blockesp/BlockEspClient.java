@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
+import java.util.function.Predicate;
 
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
@@ -44,7 +45,9 @@ import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
 import net.minecraft.world.level.block.entity.TrialSpawnerBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.Vec3;
 
@@ -60,7 +63,10 @@ public class BlockEspClient implements ClientModInitializer {
 
 	// ---- Settings (tweak these) ----
 	private static final int SCAN_INTERVAL_TICKS = 20; // rescan once per second
-	private static final int MAX_TARGETS = 300;        // nearest N blocks get drawn
+	private static final int MAX_TARGETS = 300;        // nearest N storage blocks get drawn
+	private static final int ORE_SCAN_INTERVAL_TICKS = 40; // ore scans are heavier: every 2 seconds
+	private static final int ORE_RADIUS_CHUNKS = 4;    // ore scan radius (4 chunks = 64 blocks)
+	private static final int MAX_ORE_TARGETS = 300;    // nearest N ores get drawn
 	private static final float ALPHA = 0.35f;          // box transparency
 
 	// A copy of the vanilla debug filled-box pipeline with depth testing turned off,
@@ -82,9 +88,12 @@ public class BlockEspClient implements ClientModInitializer {
 	private static KeyMapping menuKey;
 	private static boolean enabled = false;
 	private static int tickCounter = 0;
+	private static int oreTickCounter = 0;
 
 	// Filled on the client tick, snapshotted during extraction, read while drawing.
 	private static volatile List<Target> scanned = List.of();
+	private static List<Target> scannedBlocks = List.of();
+	private static List<Target> scannedOres = List.of();
 	private static volatile List<Target> renderTargets = List.of();
 
 	/** One highlighted block. rgb is 0xRRGGBB. */
@@ -126,7 +135,7 @@ public class BlockEspClient implements ClientModInitializer {
 	private void onClientTick(Minecraft client) {
 		while (toggleKey.consumeClick()) {
 			setEnabled(!enabled);
-			if (client.player != null) {
+			if (client.player != null && EspConfig.showToggleMessage()) {
 				client.player.sendSystemMessage(Component.literal("Block ESP: " + (enabled ? "ON" : "OFF")));
 			}
 		}
@@ -139,13 +148,32 @@ public class BlockEspClient implements ClientModInitializer {
 
 		if (!enabled || client.level == null || client.player == null) {
 			scanned = List.of();
+			scannedBlocks = List.of();
+			scannedOres = List.of();
 			return;
 		}
 
-		if (++tickCounter < SCAN_INTERVAL_TICKS) return;
-		tickCounter = 0;
+		boolean changed = false;
+		int renderDistance = client.options.getEffectiveRenderDistance();
 
-		scanned = scan(client.level, client.player, client.options.getEffectiveRenderDistance());
+		if (++tickCounter >= SCAN_INTERVAL_TICKS) {
+			tickCounter = 0;
+			scannedBlocks = scanBlockEntities(client.level, client.player, renderDistance);
+			changed = true;
+		}
+
+		if (++oreTickCounter >= ORE_SCAN_INTERVAL_TICKS) {
+			oreTickCounter = 0;
+			scannedOres = scanOres(client.level, client.player, Math.min(renderDistance, ORE_RADIUS_CHUNKS));
+			changed = true;
+		}
+
+		if (changed) {
+			List<Target> combined = new ArrayList<>(scannedBlocks.size() + scannedOres.size());
+			combined.addAll(scannedBlocks);
+			combined.addAll(scannedOres);
+			scanned = List.copyOf(combined);
+		}
 	}
 
 	public static boolean isEnabled() {
@@ -160,9 +188,10 @@ public class BlockEspClient implements ClientModInitializer {
 	/** Makes the next client tick rescan immediately (used when settings change). */
 	public static void requestRescan() {
 		tickCounter = SCAN_INTERVAL_TICKS;
+		oreTickCounter = ORE_SCAN_INTERVAL_TICKS;
 	}
 
-	private static List<Target> scan(ClientLevel level, Player player, int radiusChunks) {
+	private static List<Target> scanBlockEntities(ClientLevel level, Player player, int radiusChunks) {
 		int pcx = SectionPos.blockToSectionCoord(player.getBlockX());
 		int pcz = SectionPos.blockToSectionCoord(player.getBlockZ());
 		List<Target> found = new ArrayList<>();
@@ -181,10 +210,70 @@ public class BlockEspClient implements ClientModInitializer {
 			}
 		}
 
+		return nearest(found, player, MAX_TARGETS);
+	}
+
+	private static List<Target> scanOres(ClientLevel level, Player player, int radiusChunks) {
+		List<EspConfig.Category> ores = new ArrayList<>();
+		for (EspConfig.Category c : EspConfig.Category.values()) {
+			if (c.isOre() && EspConfig.isEnabled(c)) ores.add(c);
+		}
+		if (ores.isEmpty()) return List.of();
+
+		// Quick check used to skip whole 16x16x16 sections that contain none of the enabled ores.
+		Predicate<BlockState> anyOre = state -> {
+			for (EspConfig.Category c : ores) {
+				if (c.oreMatcher.test(state)) return true;
+			}
+			return false;
+		};
+
+		int pcx = SectionPos.blockToSectionCoord(player.getBlockX());
+		int pcz = SectionPos.blockToSectionCoord(player.getBlockZ());
+		List<Target> found = new ArrayList<>();
+
+		for (int cx = pcx - radiusChunks; cx <= pcx + radiusChunks; cx++) {
+			for (int cz = pcz - radiusChunks; cz <= pcz + radiusChunks; cz++) {
+				LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+				if (chunk == null) continue;
+
+				int baseX = SectionPos.sectionToBlockCoord(cx);
+				int baseZ = SectionPos.sectionToBlockCoord(cz);
+				LevelChunkSection[] sections = chunk.getSections();
+
+				for (int i = 0; i < sections.length; i++) {
+					LevelChunkSection section = sections[i];
+					if (section == null || section.hasOnlyAir()) continue;
+					if (!section.getStates().maybeHas(anyOre)) continue;
+
+					int baseY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(i));
+
+					for (int y = 0; y < 16; y++) {
+						for (int z = 0; z < 16; z++) {
+							for (int x = 0; x < 16; x++) {
+								BlockState state = section.getBlockState(x, y, z);
+								for (EspConfig.Category c : ores) {
+									if (c.oreMatcher.test(state)) {
+										found.add(new Target(baseX + x, baseY + y, baseZ + z, c.rgb));
+										break;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return nearest(found, player, MAX_ORE_TARGETS);
+	}
+
+	/** Sorts by distance to the player and keeps only the closest `limit`. */
+	private static List<Target> nearest(List<Target> found, Player player, int limit) {
 		double px = player.getX(), py = player.getY(), pz = player.getZ();
 		found.sort(Comparator.comparingDouble(t -> t.distSq(px, py, pz)));
-		if (found.size() > MAX_TARGETS) {
-			found = found.subList(0, MAX_TARGETS);
+		if (found.size() > limit) {
+			found = found.subList(0, limit);
 		}
 		return List.copyOf(found);
 	}
