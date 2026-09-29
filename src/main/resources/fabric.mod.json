@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "blockesp",
+	"version": "${version}",
+	"name": "Block ESP",
+	"description": "Highlights chests, barrels, shulker boxes, ender chests and spawners through walls. Toggle in Controls.",
+	"authors": ["You"],
+	"license": "CC0-1.0",
+	"icon": "assets/blockesp/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["com.example.blockesp.BlockEspClient"]
+	},
+	"mixins": [
+		{ "config": "blockesp.client.mixins.json", "environment": "client" }
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
