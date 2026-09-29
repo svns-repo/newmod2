@@ -1,4 +1,5 @@
 {
   "key.category.blockesp.main": "Block ESP",
-  "key.blockesp.toggle": "Toggle Chest/Spawner ESP"
+  "key.blockesp.toggle": "Toggle Chest/Spawner ESP",
+  "key.blockesp.menu": "Open Block ESP Menu"
 }
