@@ -35,7 +35,11 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.DispenserBlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
+import net.minecraft.world.level.block.entity.TrappedChestBlockEntity;
 import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
@@ -75,6 +79,7 @@ public class BlockEspClient implements ClientModInitializer {
 			new StagedVertexBuffer(() -> "BlockESP Buffer", RenderType.SMALL_BUFFER_SIZE);
 
 	private static KeyMapping toggleKey;
+	private static KeyMapping menuKey;
 	private static boolean enabled = false;
 	private static int tickCounter = 0;
 
@@ -101,6 +106,14 @@ public class BlockEspClient implements ClientModInitializer {
 				InputConstants.KEY_X,
 				category));
 
+		menuKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.blockesp.menu",
+				InputConstants.Type.KEYSYM,
+				InputConstants.KEY_B,
+				category));
+
+		EspConfig.load();
+
 		ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
 		LevelExtractionEvents.END_EXTRACTION.register(ctx -> renderTargets = enabled ? scanned : List.of());
 		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(this::renderAndDraw);
@@ -112,10 +125,15 @@ public class BlockEspClient implements ClientModInitializer {
 
 	private void onClientTick(Minecraft client) {
 		while (toggleKey.consumeClick()) {
-			enabled = !enabled;
-			tickCounter = SCAN_INTERVAL_TICKS; // force an immediate rescan
+			setEnabled(!enabled);
 			if (client.player != null) {
 				client.player.sendSystemMessage(Component.literal("Block ESP: " + (enabled ? "ON" : "OFF")));
+			}
+		}
+
+		while (menuKey.consumeClick()) {
+			if (client.player != null) {
+				client.gui.setScreen(new EspConfigScreen());
 			}
 		}
 
@@ -128,6 +146,20 @@ public class BlockEspClient implements ClientModInitializer {
 		tickCounter = 0;
 
 		scanned = scan(client.level, client.player, client.options.getEffectiveRenderDistance());
+	}
+
+	public static boolean isEnabled() {
+		return enabled;
+	}
+
+	public static void setEnabled(boolean value) {
+		enabled = value;
+		requestRescan();
+	}
+
+	/** Makes the next client tick rescan immediately (used when settings change). */
+	public static void requestRescan() {
+		tickCounter = SCAN_INTERVAL_TICKS;
 	}
 
 	private static List<Target> scan(ClientLevel level, Player player, int radiusChunks) {
@@ -157,16 +189,27 @@ public class BlockEspClient implements ClientModInitializer {
 		return List.copyOf(found);
 	}
 
-	/** Returns 0xRRGGBB for blocks we care about, or -1 to ignore. Add more types here. */
+	/** Returns 0xRRGGBB for enabled block types, or -1 to ignore. */
 	private static int colorFor(BlockEntity be) {
+		EspConfig.Category category = categoryOf(be);
+		if (category == null || !EspConfig.isEnabled(category)) return -1;
+		return category.rgb;
+	}
+
+	/** Maps a block entity to its menu category. Order matters: subclasses first. */
+	private static EspConfig.Category categoryOf(BlockEntity be) {
 		return switch (be) {
-			case TrialSpawnerBlockEntity t -> 0xFF8C00; // orange
-			case SpawnerBlockEntity s     -> 0xFF2020; // red
-			case ShulkerBoxBlockEntity s  -> 0xB050FF; // purple
-			case EnderChestBlockEntity e  -> 0x20C0A0; // teal
-			case BarrelBlockEntity b      -> 0xA0522D; // brown
-			case ChestBlockEntity c       -> 0xFFD700; // gold (includes trapped chests)
-			default -> -1;
+			case TrialSpawnerBlockEntity t      -> EspConfig.Category.TRIAL_SPAWNERS;
+			case SpawnerBlockEntity s           -> EspConfig.Category.SPAWNERS;
+			case ShulkerBoxBlockEntity s        -> EspConfig.Category.SHULKER_BOXES;
+			case EnderChestBlockEntity e        -> EspConfig.Category.ENDER_CHESTS;
+			case BarrelBlockEntity b            -> EspConfig.Category.BARRELS;
+			case TrappedChestBlockEntity t      -> EspConfig.Category.TRAPPED_CHESTS;
+			case ChestBlockEntity c             -> EspConfig.Category.CHESTS;
+			case HopperBlockEntity h            -> EspConfig.Category.HOPPERS;
+			case DispenserBlockEntity d         -> EspConfig.Category.DISPENSERS; // droppers too
+			case AbstractFurnaceBlockEntity f   -> EspConfig.Category.FURNACES;   // + smokers, blast furnaces
+			default -> null;
 		};
 	}
 
